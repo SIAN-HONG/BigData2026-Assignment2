@@ -1,7 +1,0 @@
-{"dataset": "dataset.parquet", "weights": "", "xgb_groups": ["T0","T1","R1","R2"],
- "xgb_params": {"max_depth": 10, "min_child_weight": 50}, "xgb_seeds": [0,1,2],
- "nn_groups": ["T0","T1","R1"], "nn_variants": ["gnn","mlp"], "nn_seeds": [0], "nn_epochs": 8,
- "every": 3, "decision": "joint_plugin",
- "seq_members": [{"arch": "cnn", "seed": 0}, {"arch": "tfm", "seed": 0}],
- "seq_groups": ["T0","T1","R1"], "seq_weights": "quality", "seq_weight": 0.4,
- "_note": "Phase 2c candidate (p2d): 0.6 x v1 ensemble + 0.2 CNN + 0.2 Transformer sequence hybrids"}
