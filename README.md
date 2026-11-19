@@ -66,6 +66,10 @@ into `$RAW` (default `~/gharchive`; it stops if any hour is missing), runs the o
 on exactly the hours before the cutoff, builds the features, runs the leakage audit, trains the model
 and writes `output_<studentID>.csv`, which is checked with the course's `evaluate.py`. A cutoff earlier
 than 2026-11-21T12:00 writes a rehearsal file `output_<studentID>_rehearsal_<MMDD>.csv`.
+At the official cutoff, `predict.py` stops with an error if `assignment2/submission/test_input.csv` is missing,
+malformed or not the pinned course file (4,465 users, checked by SHA-256), or if a test user has no features;
+it never falls back to its own user selection. The written file is re-read and must have the header
+`UserID` + 6 activities, only 0/1 values, and the test users in the same order.
 
 Rolling backtest of the final configuration on tables built the same way (in `src/`):
 

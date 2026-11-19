@@ -42,10 +42,16 @@ DEFAULT_CFG = {
 }
 
 
+FINAL_CONFIG = "configs/final_config_s3.json"   # the submitted configuration (run_final.sh default)
+
+
 def load_cfg(path=None):
     p = ROOT / (path or "final_config.json")
     if not p.is_file():  # a mistyped path must not silently fall back to the defaults
         raise FileNotFoundError(f"config file not found: {p}")
+    if p.resolve() != (ROOT / FINAL_CONFIG).resolve():   # legacy configs still run unchanged; only a note
+        print(f"NOTE: {p.name} is not the submission configuration (experiment or legacy); the submission "
+              f"uses {FINAL_CONFIG} (see configs/README.md)", flush=True)
     return {**DEFAULT_CFG, **json.loads(p.read_text())}
 
 

@@ -7,9 +7,13 @@ Uses artifacts/dataset.parquet (training samples) and artifacts/final_features.p
 build_dataset.py from the tables in data/db (preprocess.py on GH Archive).  The model and decision rule are
 pipeline.fit_predict / pipeline.decide - the exact code path of the backtest.
 
-If assignment2/submission/test_input.csv is not released yet, the official selection rule
-is applied to write a REHEARSAL file (output_<ID>_rehearsal.csv) - not a submission.
-The output is always checked with the official evaluate.py; a failed check exits non-zero.
+Official mode = the final features are at FINAL_CUTOFF (2026-11-21 12:00 UTC).  In official mode the run
+stops with an error (never a silent fallback) if assignment2/submission/test_input.csv is missing or
+malformed, differs from the pinned course file (sha256, 4,465 users), or a test user has no features.
+Only at an earlier cutoff (rehearsal) may the users come from the official selection rule when the file
+is missing; that output is named output_<ID>_rehearsal*.csv and is not a submission.
+Every output is checked here (6 activity columns, 0/1 only, same users in the same order as the test
+list) and with the official evaluate.py; a failed check exits non-zero.
 """
 from __future__ import annotations
 
@@ -24,6 +28,46 @@ import pandas as pd
 
 from common import ART, DAY, FINAL_CUTOFF, RES, ROOT, TARGETS, build_events, eligible_users, load_tables, s
 from pipeline import decide, fit_predict, load_cfg
+
+# assignment2/submission/test_input.csv of the pinned course commit af9f335 (run_final.sh COURSE_COMMIT)
+OFFICIAL_TEST_SHA256 = "3bc4f0e2250f44bad45dfcd6dbc9517e0dd4aa5959d9ec11540859e052931f8e"
+OFFICIAL_TEST_USERS = 4465
+
+
+def read_test_users(path: Path, official: bool) -> np.ndarray:
+    """UserIDs of test_input.csv in file order; exits with an error if the file is malformed (any mode)
+    or, in official mode, if it is not the pinned course file."""
+    import hashlib
+    if not path.exists():
+        sys.exit(f"ERROR: {path} not found")
+    try:
+        d = pd.read_csv(path, dtype=str)
+    except Exception as e:
+        sys.exit(f"ERROR: cannot read {path}: {e}")
+    if list(d.columns) != ["UserID"]:
+        sys.exit(f"ERROR: {path} must have exactly one column 'UserID', got {list(d.columns)}")
+    u = d.UserID
+    if u.isna().any() or not u.str.fullmatch(r"\d+").all():
+        sys.exit(f"ERROR: {path} has empty or non-integer UserIDs")
+    if u.duplicated().any():
+        sys.exit(f"ERROR: {path} has duplicate UserIDs")
+    if official:
+        h = hashlib.sha256(path.read_bytes()).hexdigest()
+        if len(u) != OFFICIAL_TEST_USERS or h != OFFICIAL_TEST_SHA256:
+            sys.exit(f"ERROR: {path} is not the pinned course file ({len(u)} users, sha256 {h[:12]}...; expected "
+                     f"{OFFICIAL_TEST_USERS} users, {OFFICIAL_TEST_SHA256[:12]}...). Check the course commit.")
+    return u.astype("int64").to_numpy()
+
+
+def check_output(path: Path, users: np.ndarray):
+    """Re-read the written file: exact header, 0/1 in all six activity columns, same users in the same order."""
+    o = pd.read_csv(path, dtype=str)
+    if list(o.columns) != ["UserID"] + TARGETS:
+        sys.exit(f"ERROR: output header {list(o.columns)}")
+    if o.isna().any().any() or not o[TARGETS].isin(["0", "1"]).all().all():
+        sys.exit("ERROR: output has empty cells or values other than 0/1")
+    if not (o.UserID.astype("int64").to_numpy() == users).all() or len(o) != len(users):
+        sys.exit("ERROR: output users differ from the test list or are in another order")
 
 
 def main():
@@ -45,11 +89,14 @@ def main():
     if cut != FINAL_CUTOFF:
         print(f"NOTE: cutoff is not {FINAL_CUTOFF} - result is a rehearsal of the pipeline")
 
+    official = cut == FINAL_CUTOFF
     test_path = ROOT / "assignment2" / "submission" / "test_input.csv"
+    if official and not test_path.exists():
+        sys.exit(f"ERROR: official run but {test_path} is missing - no fallback to the selection rule")
     if test_path.exists():
-        users = pd.read_csv(test_path).UserID.to_numpy()
+        users = read_test_users(test_path, official)
         out_path = ROOT / f"output_{a.student_id}.csv"
-        if cut != FINAL_CUTOFF:
+        if not official:
             out_path = ROOT / f"output_{a.student_id}_rehearsal_{cut:%m%d}.csv"
     else:
         T = load_tables()
@@ -62,19 +109,24 @@ def main():
 
     rows = fin.set_index("UserID").reindex(users)
     miss = rows.uid.isna()
+    if miss.any() and official:
+        sys.exit(f"ERROR: {miss.sum()} test users have no features at the official cutoff")
     if miss.any():
-        print(f"WARNING: {miss.sum()} test users are not cohort users of this release -> zero features")
+        print(f"WARNING (rehearsal only): {miss.sum()} users are not cohort users of this release -> zero features")
         rows = rows.fillna(0)
     rows = rows.reset_index()
     rows["uid"] = rows.uid.astype(int)
     P, _ = fit_predict(df, ev, cut, rows, cfg)
     pred = decide(P, cfg)
+    if pred.shape != (len(users), len(TARGETS)) or not np.isin(pred, [0, 1]).all():
+        sys.exit(f"ERROR: predictions have shape {pred.shape} or non-binary values")
 
     out = pd.DataFrame(pred, columns=TARGETS)
     out.insert(0, "UserID", users.astype("int64"))
     out.to_csv(out_path, index=False)
+    check_output(out_path, users.astype("int64"))
     pd.DataFrame(P, columns=TARGETS).assign(UserID=users).to_csv(RES / "final_probabilities.csv", index=False)
-    info = {"cutoff": str(cut), "n_users": int(len(users)), "output": out_path.name, "cfg": cfg,
+    info = {"cutoff": str(cut), "official": bool(official), "n_users": int(len(users)), "output": out_path.name, "cfg": cfg,
             "predicted_positive_rate": dict(zip(TARGETS, pred.mean(0).round(4).tolist())),
             "mean_probability": dict(zip(TARGETS, P.mean(0).round(4).tolist()))}
     json.dump(info, open(RES / "final_prediction_info.json", "w"), indent=2)
