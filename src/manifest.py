@@ -1,7 +1,7 @@
 """Record what a run used, so a rerun can be compared with it.
 
   python src/manifest.py --raw ~/gharchive --start 2025-12-01 --cutoff 2026-11-21T12:00 \
-      --config configs/final_config_p3_imp.json --out results/manifest.json [--hash-hours]
+      --config configs/final_config_s3.json --out results/manifest.json [--hash-hours]
   python src/manifest.py --compare results/manifest.json other/manifest.json
 
 Writes: the hour-file bound (--cutoff) and the prediction cutoff, the effective config, ASG2_* settings,
@@ -117,7 +117,7 @@ def build(a) -> dict:
          "raw_end_exclusive": a.cutoff,                           # right bound of the hour files used
          "prediction_cutoff": info["cutoff"],                      # cutoff of the features predict.py used
          "config_path": a.config, "config_effective": cfg,
-         "env": {k: os.environ.get(k) for k in ["ASG2_DB", "ASG2_OUTAGE_RULE"]},
+         "env": {k: os.environ.get(k) for k in ["ASG2_DB", "ASG2_ART", "ASG2_OUTAGE_RULE"]},
          "course_repo": {"commit": run(["git", "-c", "safe.directory=*", "-C", str(course), "rev-parse", "HEAD"]),
                          "files": files(need([course / "scripts/preprocess.py", course / "scripts/evaluate.py",
                                               course / "scripts/cohort.txt",

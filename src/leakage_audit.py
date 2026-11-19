@@ -5,7 +5,7 @@ time t would have contained:
   * "known only later" columns nulled when their value is >= t
     (merged_at + merged_by_id, PR closed_at, Issues.closed_at + state_reason, dismissed_at)
   * FKs into removed rows set to null (rows are not renumbered, so ids stay comparable)
-Run: python src/leakage_audit.py [cutoff ...]
+Run: python src/leakage_audit.py [--impute[=week|prevday]] [cutoff ...]
 """
 from __future__ import annotations
 
@@ -17,7 +17,8 @@ import pandas as pd
 from common import DAY, build_events, eligible_users, load_tables, s
 from features import FeatureBuilder
 
-IMPUTE = "--impute" in sys.argv   # audit the outage-imputed features (features.impute_outages)
+# audit the outage-imputed features (features.impute_outages): --impute (copy) or --impute=week|prevday
+IMPUTE = next((a.split("=", 1)[1] if "=" in a else "copy" for a in sys.argv if a.startswith("--impute")), False)
 
 GROUPS = ("T0", "T1", "R1", "R2", "TG", "T2", "R3", "O", "R4")
 
@@ -71,6 +72,6 @@ def audit(T, ev, t):
 if __name__ == "__main__":
     T = load_tables()
     ev = build_events(T)
-    cuts = [a for a in sys.argv[1:] if not a.startswith("--")] or ["2026-05-13 12:00", "2026-09-23 12:00"]
+    cuts = [a for a in sys.argv[1:] if not a.startswith("--")] or ["2026-05-16 12:00", "2026-09-05 12:00", "2026-11-07 12:00"]   # Saturdays; 09-05 and 11-07 follow outages
     nbad = sum(audit(T, ev, s(c)) for c in cuts)
     print("LEAKAGE AUDIT", "PASSED" if nbad == 0 else "FAILED")

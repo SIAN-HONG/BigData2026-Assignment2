@@ -15,36 +15,50 @@ educational use within the course.
 
 ## Method
 
-The 8 tables are merged into one point-in-time event log (each row has the time of the action and the
-time it became known). Days on which GH Archive lost an activity are detected and filled with the same
-span whole weeks earlier (features only). For every daily cutoff t (12:00 UTC), features use only rows
-known before t: temporal (T0, T1) and relational (R1 user-centric, R2 repository / collaborator).
-Labels are activity in [t+4h, t+4h+7d), the same offset as the test week. The model averages the
-probabilities of XGBoost (one model per activity, 3 seeds, depth 4, early stopping), a user–repository
-GNN and an MLP; a label-free decision rule then chooses the positives of each activity.
+* **Point-in-time event log.** The 8 tables are merged into one event log; each row has the time of
+  the action and the time it became known. Features at a cutoff t use only rows known before t.
+* **Samples.** One cutoff per week, Saturday 12:00 UTC (20:00 Taiwan), the weekday and hour of the
+  official cutoff, from 2026-03-21 (107 days after the data start, so the 90-day features and the
+  test-user rule have complete history). Labels = activity in [t+4h, t+4h+7d), the same offset as the
+  test week. Users are selected with the rule that reproduces `test_input.csv`.
+* **Collection outages.** A day whose count of an activity is < 10 % of the median of the last 28
+  earlier normal days is an outage; it is filled with that user's events of the day before the outage
+  (features only, point-in-time).
+* **52 features.** Temporal: counts in 7 / 28 / 90 days, days since the last action, 14-day decayed
+  count, active weeks out of 12 (36). Cross-table, user-centric (7, 28-day counts unless noted):
+  comments, reviews and line comments by others on the user's own issues / PRs; PRs the user merged as
+  maintainer; the user's own PRs that were merged; own open PRs and issues (first seen in the last 90
+  days). Cross-table, repositories and collaborators (9): number of repositories, share of activity in
+  own repositories, number of collaborators, 7-day activity of the user's repositories (by type).
+* **Model.** XGBoost (one model per activity, 3 seeds) and an MLP; their probabilities are averaged and a
+  label-free decision rule chooses, for each activity, the number of positives that maximises the
+  expected score.
+* **Validation.** Rolling, the last 6 labelled Saturdays: a model validated at V trains only on cutoffs
+  ≤ V − 14 days, whose label windows (+ 5 days for late rows) end before V. The configuration was
+  chosen after comparing full and simplified feature sets on these weeks.
 
 ## Files
 
 | Path | Content |
 |---|---|
-| `run_final.sh` | the whole pipeline: course repo, download, preprocessing, features, prediction, manifest |
+| `run_final.sh` | the whole pipeline: course repo, download, preprocessing, features, leakage audit, prediction, manifest |
 | `download_gharchive.sh` | downloads the GH Archive hour files of a period |
-| `configs/final_config_p4_imp.json` | the submitted configuration |
+| `configs/final_config_s3.json` | the submitted configuration |
 | `src/run_preprocess.py` | runs the official `preprocess.py` with more worker processes (same output) |
-| `src/common.py`, `src/features.py` | event log, labels, test-user rule; feature groups and outage imputation |
-| `src/build_dataset.py`, `src/leakage_audit.py` | training samples and features; point-in-time check |
-| `src/modeling.py`, `src/gnn.py`, `src/pipeline.py`, `src/exp.py`, `src/exp2.py` | XGBoost, GNN / MLP, final method |
+| `src/common.py`, `src/features.py` | event log, labels, test-user rule; features and outage filling |
+| `src/build_dataset.py`, `src/leakage_audit.py` | weekly training samples and features; point-in-time check |
+| `src/modeling.py`, `src/gnn.py`, `src/pipeline.py`, `src/exp.py`, `src/exp2.py` | XGBoost, MLP, the final method and its rolling backtest |
 | `src/predict.py`, `src/manifest.py` | writes and checks `output_<studentID>.csv`; records hashes and versions |
 
 ## How to run
 
-Requirements: Linux, Python 3.11, an NVIDIA GPU, about 200 GB of disk for the hour files.
+Requirements: Linux, Python 3.11, git, wget, an NVIDIA GPU, about 200 GB of disk for the hour files.
 
 ```bash
 uv venv --python 3.11 .venv
 uv pip install --python .venv/bin/python -r requirements.txt
 # check nvidia-smi for an idle GPU, then:
-./run_final.sh <studentID> <gpu_index> configs/final_config_p4_imp.json 2026-11-21T12:00
+./run_final.sh <studentID> <gpu_index> configs/final_config_s3.json 2026-11-21T12:00
 ```
 
 `run_final.sh` clones the course repository at commit `af9f335`, downloads the missing hour files
@@ -52,3 +66,9 @@ into `$RAW` (default `~/gharchive`; it stops if any hour is missing), runs the o
 on exactly the hours before the cutoff, builds the features, runs the leakage audit, trains the model
 and writes `output_<studentID>.csv`, which is checked with the course's `evaluate.py`. A cutoff earlier
 than 2026-11-21T12:00 writes a rehearsal file `output_<studentID>_rehearsal_<MMDD>.csv`.
+
+Rolling backtest of the final configuration on tables built the same way (in `src/`):
+
+```bash
+CUDA_VISIBLE_DEVICES=<gpu> ../.venv/bin/python pipeline.py --backtest --config configs/final_config_s3.json --val last6
+```

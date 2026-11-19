@@ -2,13 +2,14 @@
 official prediction, so the validated code path is exactly the submitted one.
 
 fit_predict(df, ev, cut, target_rows, cfg):
-  1. training samples = every (user, cutoff) with cutoff <= cut - 8 days (label windows
-     complete before `cut`), cutoffs spaced cfg["every"] days
+  1. training samples = every (user, cutoff) with cutoff <= cut - 8 days; with the weekly Saturday
+     cutoffs that is cut - 14 d and earlier, whose label windows (+ 5 d late-arrival slack) end before
+     `cut`, so the labels use only rows known before `cut` (no label censoring needed)
   2. gradient-boosted trees (XGBoost, GPU) on all feature groups, several seeds
   3. relational neural nets (user<->repo GNN and plain MLP), several seeds
   4. average the probabilities of all members
   5. label-free joint plug-in decision rule maximising the expected official score
-Backtest:  python src/pipeline.py --backtest
+Backtest:  python src/pipeline.py --backtest --val last6   (rolling, the last 6 labelled Saturdays)
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ import pandas as pd
 
 from common import ART, RES, ROOT, TARGETS
 from features import feature_groups
-from modeling import (EXCLUDE_WEEKS, YCOLS, censor_labels, feature_cols, joint_plugin_predict, official_score,
+from modeling import (YCOLS, feature_cols, joint_plugin_predict, official_score,
                       outage_label_mask, quality_weights,
                       plugin_predict, predict, train_models, train_window)
 
@@ -36,7 +37,7 @@ DEFAULT_CFG = {
     "nn_variants": ["gnn", "mlp"],
     "nn_seeds": [0],
     "nn_epochs": 8,
-    "every": 3,
+    "every": 1,
     "decision": "joint_plugin",
 }
 
@@ -55,8 +56,11 @@ def fit_predict(df, ev, cut, target_rows, cfg, log=print):
     G = feature_groups(feature_cols(df))
     members = []
     # ---- trees ---------------------------------------------------------------------------
-    fx = [f for g in cfg["xgb_groups"] for f in G[g]]
-    tr = censor_labels(train_window(df, cut, every=cfg["every"]), ev, cut)
+    # explicit feature lists (cfg "xgb_features" / "nn_features") override the feature groups
+    fx = cfg.get("xgb_features") or [f for g in cfg["xgb_groups"] for f in G[g]]
+    tr = train_window(df, cut, every=cfg["every"])
+    last_end = (tr.cutoff.max() + pd.Timedelta(hours=4, days=7 + 5))   # label window + late-arrival slack
+    assert last_end <= cut, f"training labels reach past the cutoff: {last_end} > {cut}"
     W = quality_weights(tr, cfg["weights"]) if cfg.get("weights", "").startswith("quality") else None
     # optional: drop (weight 0) the labels whose window overlaps an outage of that activity
     M = outage_label_mask(tr, ev, cut) if cfg.get("label_mask") == "outage" else None
@@ -79,7 +83,7 @@ def fit_predict(df, ev, cut, target_rows, cfg, log=print):
         + ("" if M is None else "; outage-masked label share " + ", ".join(f"{c} {1 - M[c].mean():.2f}" for c in TARGETS)))
     # ---- relational neural nets ---------------------------------------------------------
     if cfg["nn_variants"]:
-        fn = [f for g in cfg["nn_groups"] for f in G[g]]
+        fn = cfg.get("nn_features") or [f for g in cfg["nn_groups"] for f in G[g]]
         train_cuts = sorted(tr.cutoff.unique())
         graphs = gnn.build_graphs(tr, fn, ev, train_cuts + [cut], rows={cut: target_rows})
         for var in cfg["nn_variants"]:
@@ -110,22 +114,40 @@ def decide(P, cfg):
     return joint_plugin_predict(P) if cfg["decision"] == "joint_plugin" else plugin_predict(P)
 
 
-def val_weeks(val):
-    """'main' | 'extra' | comma-separated dates (validation cutoffs at 12:00 UTC)."""
-    from exp import VAL
-    from exp2 import VAL_EXTRA
-    if val in ("main", "extra"):
-        return VAL if val == "main" else VAL_EXTRA
+def val_weeks(val, df):
+    """'lastN' (the N latest labelled cutoffs of the dataset, e.g. last6) | comma-separated dates
+    (validation cutoffs at 12:00 UTC)."""
+    if val.startswith("last"):
+        return list(sorted(df.cutoff.unique())[-int(val[4:]):])
     return [pd.Timestamp(f"{d} 12:00") for d in val.split(",")]
 
 
-def backtest(name="final_backtest", config=None, val="main"):
+def outage_targets(ev, weeks):
+    """Activities with a collection-outage day (common.outage_flags on the daily counts) in the label
+    window [V + 4h, V + 4h + 7d) of each week V; they are left out of that week's outage-aware score."""
+    from common import DAY, GAP_SEC, outage_flags
+    e = ev[ev.kind < 6]
+    day = e.ts // DAY
+    c = e.groupby([day, e.kind]).size().unstack(fill_value=0).reindex(columns=range(6), fill_value=0)
+    c = c.reindex(range(int(c.index.min()), int(ev.avail.max() // DAY)), fill_value=0)
+    out = {k: outage_flags(c[k].to_numpy())[0] for k in range(6)}
+    res = {}
+    for v in weeks:
+        s0 = int(pd.Timestamp(v).value // 10**9) + GAP_SEC
+        d = (np.arange(c.index[0], c.index[-1] + 1) >= s0 // DAY) & (np.arange(c.index[0], c.index[-1] + 1) * DAY < s0 + 7 * DAY)
+        res[str(pd.Timestamp(v).date())] = [TARGETS[k] for k in range(6) if out[k][d].any()]
+    return res
+
+
+def backtest(name="final_backtest", config=None, val="last6"):
     cfg = load_cfg(config)
     df = pd.read_parquet(ART / cfg["dataset"])
     ev = pd.read_parquet(ART / "events.parquet")
     rows, folds, all_members = [], [], []
     t0 = time.time()
-    for v in val_weeks(val):
+    weeks = val_weeks(val, df)
+    drop = outage_targets(ev, weeks)
+    for v in weeks:
         va = df[df.cutoff == v]
         if not len(va):
             print(f"  {v.date()}  no labelled samples in this release, skipped", flush=True)
@@ -135,24 +157,27 @@ def backtest(name="final_backtest", config=None, val="main"):
         folds.append((v, P, Y, va.UserID.to_numpy()))
         all_members.append((v, members, Y, va.UserID.to_numpy()))
         r = {"val": str(v.date()), **official_score(decide(P, cfg), Y)}
+        keep = [j for j, c in enumerate(TARGETS) if c not in drop[r["val"]]]
+        r["outage_aware_score"] = official_score(decide(P, cfg)[:, keep], Y[:, keep])["score"]
+        r["dropped"] = ",".join(drop[r["val"]])
         r["per_target_plugin_score"] = official_score(plugin_predict(P), Y)["score"]
         nx = len(cfg["xgb_seeds"])   # members: xgb..., nn..., seq...
         r["xgb_only_score"] = official_score(decide(np.mean(members[:nx], 0), cfg), Y)["score"] if nx else np.nan
         rows.append(r)
-        print(f"  {v.date()}  score {r['score']:.4f}  (macro {r['macro_f1']:.4f}, micro {r['micro_f1']:.4f})", flush=True)
+        print(f"  {v.date()}  score {r['score']:.4f}  (macro {r['macro_f1']:.4f}, micro {r['micro_f1']:.4f})"
+              f"  outage-aware {r['outage_aware_score']:.4f} (left out: {r['dropped'] or '-'})", flush=True)
     R = pd.DataFrame(rows)
     R.to_csv(RES / f"{name}.csv", index=False)
     pickle.dump(folds, open(ART / f"folds_{name}.pkl", "wb"))
     pickle.dump(all_members, open(ART / f"members_{name}.pkl", "wb"))   # per-member probabilities
-    E = R[~R.val.isin(EXCLUDE_WEEKS)]
-    summ = {"name": name, "cfg": cfg, "weeks": list(E.val),
-            "score": E.score.mean(), "macro_f1": E.macro_f1.mean(), "micro_f1": E.micro_f1.mean(),
-            "score_std_over_weeks": E.score.std(), "per_target_plugin_score": E.per_target_plugin_score.mean(),
-            "xgb_only_score": E.xgb_only_score.mean(), "minutes": (time.time() - t0) / 60,
-            "excluded_outage_week": R[R.val.isin(EXCLUDE_WEEKS)].to_dict("records")}
+    summ = {"name": name, "cfg": cfg, "weeks": list(R.val), "dropped": drop,
+            "score": R.score.mean(), "outage_aware_score": R.outage_aware_score.mean(),
+            "macro_f1": R.macro_f1.mean(), "micro_f1": R.micro_f1.mean(),
+            "score_std_over_weeks": R.score.std(), "per_target_plugin_score": R.per_target_plugin_score.mean(),
+            "xgb_only_score": R.xgb_only_score.mean(), "minutes": (time.time() - t0) / 60}
     json.dump(summ, open(RES / f"{name}.json", "w"), indent=2, default=float)
     print(R.round(4).to_string())
-    print(json.dumps({k: v for k, v in summ.items() if k not in ("cfg", "excluded_outage_week")}, default=float))
+    print(json.dumps({k: v for k, v in summ.items() if k not in ("cfg", "dropped")}, default=float))
 
 
 if __name__ == "__main__":
@@ -160,7 +185,7 @@ if __name__ == "__main__":
     ap.add_argument("--backtest", action="store_true")
     ap.add_argument("--name", default="final_backtest")
     ap.add_argument("--config", default=None, help="config json relative to the project root")
-    ap.add_argument("--val", default="main", help="main | extra | comma-separated dates, e.g. 2026-10-14,2026-10-21")
+    ap.add_argument("--val", default="last6", help="lastN | comma-separated dates, e.g. 2026-10-31,2026-11-07")
     a = ap.parse_args()
     if a.backtest:
         backtest(a.name, a.config, a.val)

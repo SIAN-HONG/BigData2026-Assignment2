@@ -33,8 +33,11 @@ def _pivot_count(sub: pd.DataFrame, uids: np.ndarray, kinds, prefix: str) -> pd.
 
 
 class FeatureBuilder:
-    def __init__(self, T: dict, ev: pd.DataFrame, impute: bool = False):
-        self.impute = impute   # fill detected collection outages before computing features (impute_outages)
+    def __init__(self, T: dict, ev: pd.DataFrame, impute=False):
+        # False, or the method used to fill detected collection outages before computing features
+        # (impute_outages): "copy" (same span whole weeks earlier), "week" (mean of the previous 7 days),
+        # "prevday" (the previous day repeated); True means "copy"
+        self.impute = impute
         self.ev = ev
         self.ev_avail = ev.avail.to_numpy()
         users = T["Users"]
@@ -99,7 +102,7 @@ class FeatureBuilder:
         past = self.ev.iloc[:n_av]
         past = past[past.ts < t]
         if self.impute:
-            past = impute_outages(past, t)
+            past = impute_outages(past, t, "copy" if self.impute is True else self.impute)
         ts = past.ts.to_numpy()
         feats = []
         if "T0" in groups:
@@ -430,11 +433,46 @@ def outage_intervals(past, t, back_days=100):
     return out
 
 
-def impute_outages(past, t):
-    """Fill every collection outage of an activity kind (outage_intervals, point-in-time) with that
-    kind's events of the same span whole weeks earlier, shifted forward.  A hole of length L is
-    filled from [a - s, b - s), s = L rounded up to whole weeks (keeps the weekday pattern).
-    Only rows known before t are used; the filled rows get avail = ts."""
+def _fill_prevday(own, a, b):
+    """Repeat the events of the day before the hole [a, b) on every day of the hole."""
+    src = own[(own.ts >= a - DAY) & (own.ts < a)]
+    parts = []
+    for j in range(int(-(-(b - a) // DAY))):
+        f = src.assign(ts=src.ts + (j + 1) * DAY)
+        parts.append(f[f.ts < b])
+    return parts
+
+
+def _fill_week(own, a, b):
+    """Spread each user's mean daily count of the 7 days before the hole [a, b) over the hole days.
+    A user with n events in those 7 days gets floor((j+1) n/7 + f) - floor(j n/7 + f) events on hole
+    day j (so n/7 per day on average; f in [0, 1) is a fixed per-user phase, so that users with few
+    events do not all land on the same day), taken in time order from the user's own events of that
+    week (cycled), each keeping its repo and time of day."""
+    src = own[(own.ts >= a - 7 * DAY) & (own.ts < a)].sort_values(["uid", "ts"], kind="stable")
+    if not len(src):
+        return []
+    n = src.groupby("uid").ts.transform("size").to_numpy()
+    r = src.groupby("uid").cumcount().to_numpy()
+    tod = src.ts.to_numpy() % DAY
+    f0 = (src.uid.to_numpy() * 0.6180339887) % 1.0       # deterministic per-user phase
+    parts = []
+    for j in range(int(-(-(b - a) // DAY))):
+        lo = np.floor(j * n / 7 + f0).astype(int)
+        hi = np.floor((j + 1) * n / 7 + f0).astype(int)
+        m = ((r - lo) % n) < (hi - lo)
+        f = src[m].assign(ts=a + j * DAY + tod[m])
+        parts.append(f[f.ts < b])
+    return parts
+
+
+def impute_outages(past, t, method="copy"):
+    """Fill every collection outage of an activity kind (outage_intervals, point-in-time); only rows
+    known before t are used and the filled rows get avail = ts.  Methods:
+      copy    - that kind's events of the same span whole weeks earlier, shifted forward (a hole of
+                length L is filled from [a - s, b - s), s = L rounded up to whole weeks)
+      week    - each user's mean daily count of the 7 days before the hole (_fill_week)
+      prevday - the events of the day before the hole, repeated on each hole day (_fill_prevday)"""
     iv = outage_intervals(past, t)
     fill = []
     for k, ivs in iv.items():
@@ -446,12 +484,20 @@ def impute_outages(past, t):
                 holes.append([a, b])
         own = past[past.kind == k]
         for a, b in holes:                     # in time order: a later hole may copy an earlier fill
-            sh = -(-(b - a) // (7 * DAY)) * 7 * DAY
-            src = own[(own.ts >= a - sh) & (own.ts < b - sh)]
-            if len(src):
-                f = src.assign(ts=src.ts + sh, avail=src.ts + sh)
-                fill.append(f)
-                own = pd.concat([own, f], ignore_index=True)
+            if method == "copy":
+                sh = -(-(b - a) // (7 * DAY)) * 7 * DAY
+                src = own[(own.ts >= a - sh) & (own.ts < b - sh)]
+                parts = [src.assign(ts=src.ts + sh)] if len(src) else []
+            elif method == "week":
+                parts = _fill_week(own, a, b)
+            elif method == "prevday":
+                parts = _fill_prevday(own, a, b)
+            else:
+                raise ValueError(f"unknown imputation method {method}")
+            parts = [f.assign(avail=f.ts) for f in parts if len(f)]
+            if parts:
+                fill.extend(parts)
+                own = pd.concat([own, *parts], ignore_index=True)
     return pd.concat([past, *fill], ignore_index=True) if fill else past
 
 
@@ -547,7 +593,7 @@ def _r4(self, past, t, uids):
     a = pr.author.to_numpy()
     by_noncohort = (a >= 0) & ~self.cohort[np.maximum(a, 0)]   # unknown authors count as cohort
     P = pd.DataFrame({"repo": pr.repo.to_numpy(), "open_pr": is_open, "open_pr_noncohort": is_open & by_noncohort,
-                      "new_pr7": known & (fs >= t - 7 * DAY), "merged7": (merged < t) & (merged >= t - 7 * DAY),
+                      "new_pr7": known & (fs >= t - 7 * DAY), "merged7": (fs < t) & (merged < t) & (merged >= t - 7 * DAY),
                       "open_pr_stale7": is_open & (fs < t - 7 * DAY), "open_pr_hot3": is_open & hot})
     P = P[(P.repo >= 0) & (P.open_pr | P.new_pr7 | P.merged7)]
     iss = self.iss

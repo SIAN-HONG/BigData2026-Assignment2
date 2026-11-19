@@ -22,7 +22,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = Path(os.environ.get("ASG2_DB", ROOT / "data" / "db"))
-ART = ROOT / "artifacts"
+ART = Path(os.environ.get("ASG2_ART", ROOT / "artifacts"))   # separate experiments keep their own artifacts
 RES = ROOT / "results"
 FIG = ROOT / "figures"
 for _d in (ART, RES, FIG):

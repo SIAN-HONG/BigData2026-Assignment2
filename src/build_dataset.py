@@ -7,7 +7,7 @@ A sample mirrors the official setting exactly:
   * features    = only rows with availability time < t
   * labels      = activity in [t + 4h, t + 4h + 7d)   (official: 11-21 16:00 -> 11-28 16:00 UTC)
 
-Usage:  python src/build_dataset.py [--start 2026-01-07] [--every 1] [--jobs 16]
+Usage:  python src/build_dataset.py [--impute week|prevday|copy] [--start 2026-03-21] [--every 7] [--jobs 16]
 Writes artifacts/dataset.parquet (one row per user x cutoff) and, for inference,
 artifacts/final_features.parquet built at the latest available cutoff.
 """
@@ -66,20 +66,25 @@ def _work(t):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--start", default="2026-01-07 12:00")
-    ap.add_argument("--every", type=int, default=1, help="days between cutoffs")
+    # weekly cutoffs on Saturday 12:00 UTC (20:00 Taiwan), the weekday and hour of the official cutoff
+    # 2026-11-21; the first one leaves 107 days of data before it (90-day features and the cohort rule's
+    # 90 days before t - 17 d) after the data start 2025-12-01
+    ap.add_argument("--start", default="2026-03-21 12:00")
+    ap.add_argument("--every", type=int, default=7, help="days between cutoffs")
     ap.add_argument("--jobs", type=int, default=16)
     ap.add_argument("--out", default=str(ART / "dataset.parquet"))
     ap.add_argument("--final-out", default=str(ART / "final_features.parquet"))
-    ap.add_argument("--impute", action="store_true",
-                    help="fill collection outages first (features.impute_outages); default outputs *_imp.parquet")
+    ap.add_argument("--impute", nargs="?", const="copy", default=None, choices=["copy", "week", "prevday"],
+                    help="fill collection outages first (features.impute_outages); outputs *_imp (copy), "
+                         "*_impW (week) or *_impD (prevday).parquet")
     ap.add_argument("--cutoff", default=None,
                     help="prediction cutoff (UTC, e.g. 2026-11-21T12:00) for final_features; the data must reach "
                          "it (stop otherwise). Default: the latest 12:00 UTC <= data end (+1 h tolerance)")
     args = ap.parse_args()
     if args.impute:
-        args.out = args.out.replace("dataset.parquet", "dataset_imp.parquet")
-        args.final_out = args.final_out.replace("final_features.parquet", "final_features_imp.parquet")
+        suf = {"copy": "_imp", "week": "_impW", "prevday": "_impD"}[args.impute]
+        args.out = args.out.replace("dataset.parquet", f"dataset{suf}.parquet")
+        args.final_out = args.final_out.replace("final_features.parquet", f"final_features{suf}.parquet")
     _init()
     _G["fb"].impute = args.impute
     data_end = _G["data_end"]
