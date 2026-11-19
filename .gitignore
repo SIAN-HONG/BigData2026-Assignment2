@@ -1,0 +1,17 @@
+assignment2/
+.venv/
+artifacts/
+logs/
+__pycache__/
+*.pyc
+output_*.csv
+.gv/
+data_backups/
+fwd/
+reh/
+reh2/
+# large local data and snapshot backups (rebuilt by the scripts; not pushed)
+data/
+data_b15/
+artifacts_b15/
+slides/Asg2_STUDENT_ID.pptx

@@ -1,0 +1,33 @@
+{
+ "xgb_groups": [
+  "T0",
+  "T1",
+  "R1",
+  "R2"
+ ],
+ "xgb_params": {
+  "max_depth": 10,
+  "min_child_weight": 50
+ },
+ "xgb_seeds": [
+  0,
+  1,
+  2
+ ],
+ "nn_groups": [
+  "T0",
+  "T1",
+  "R1"
+ ],
+ "nn_variants": [
+  "gnn",
+  "mlp"
+ ],
+ "nn_seeds": [
+  0
+ ],
+ "nn_epochs": 8,
+ "every": 3,
+ "decision": "joint_plugin",
+ "dataset": "dataset_imp.parquet"
+}

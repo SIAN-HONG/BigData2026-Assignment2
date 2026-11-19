@@ -1,0 +1,10 @@
+# Python 3.11 (tested versions)
+pandas==3.0.6
+pyarrow==26.0.0
+numpy==2.4.6
+scikit-learn==1.9.1
+lightgbm==4.7.0
+xgboost==3.2.0
+torch==2.6.0
+matplotlib==3.11.2
+# graphviz `dot` binary is needed for the figures (e.g. conda install -c conda-forge graphviz)

@@ -1,0 +1,115 @@
+{
+ "dataset": "dataset_imp_olddet.parquet",
+ "weights": "",
+ "xgb_groups": [
+  "T0",
+  "T1",
+  "R1",
+  "R2"
+ ],
+ "xgb_params": {
+  "max_depth": 10,
+  "min_child_weight": 50
+ },
+ "xgb_seeds": [
+  0,
+  1,
+  2
+ ],
+ "xgb_per_target": {
+  "open_pr": {
+   "params": {
+    "max_depth": 12,
+    "min_child_weight": 200,
+    "learning_rate": 0.05,
+    "n_estimators": 400,
+    "subsample": 1.0,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 10.0,
+    "max_bin": 256
+   },
+   "weights": ""
+  },
+  "open_issue": {
+   "params": {
+    "max_depth": 12,
+    "min_child_weight": 200,
+    "learning_rate": 0.05,
+    "n_estimators": 400,
+    "subsample": 1.0,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 10.0,
+    "max_bin": 256
+   },
+   "weights": ""
+  },
+  "issue_comment": {
+   "params": {
+    "max_depth": 12,
+    "min_child_weight": 200,
+    "learning_rate": 0.05,
+    "n_estimators": 400,
+    "subsample": 1.0,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 10.0,
+    "max_bin": 256
+   },
+   "weights": ""
+  },
+  "pr_review": {
+   "params": {
+    "max_depth": 12,
+    "min_child_weight": 200,
+    "learning_rate": 0.05,
+    "n_estimators": 400,
+    "subsample": 1.0,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 10.0,
+    "max_bin": 256
+   },
+   "weights": ""
+  },
+  "pr_review_comment": {
+   "params": {
+    "max_depth": 12,
+    "min_child_weight": 200,
+    "learning_rate": 0.05,
+    "n_estimators": 400,
+    "subsample": 1.0,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 10.0,
+    "max_bin": 256
+   },
+   "weights": ""
+  },
+  "push": {
+   "params": {
+    "max_depth": 6,
+    "min_child_weight": 50,
+    "learning_rate": 0.1,
+    "n_estimators": 200,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 10.0,
+    "max_bin": 128
+   },
+   "weights": "quality"
+  }
+ },
+ "nn_groups": [
+  "T0",
+  "T1",
+  "R1"
+ ],
+ "nn_variants": [
+  "gnn",
+  "mlp"
+ ],
+ "nn_seeds": [
+  0
+ ],
+ "nn_epochs": 8,
+ "every": 3,
+ "decision": "joint_plugin",
+ "_note": "p3 with imputation, outage detection before addendum 6 (run with ASG2_OUTAGE_RULE=rolling); comparison only"
+}

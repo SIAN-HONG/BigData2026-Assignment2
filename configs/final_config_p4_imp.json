@@ -1,0 +1,40 @@
+{
+ "dataset": "dataset_imp.parquet",
+ "weights": "",
+ "xgb_groups": [
+  "T0",
+  "T1",
+  "R1",
+  "R2"
+ ],
+ "xgb_params": {
+  "max_depth": 4,
+  "min_child_weight": 20,
+  "learning_rate": 0.05,
+  "n_estimators": 1500,
+  "early_stop": 50
+ },
+ "xgb_seeds": [
+  0,
+  1,
+  2
+ ],
+ "nn_groups": [
+  "T0",
+  "T1",
+  "R1"
+ ],
+ "nn_variants": [
+  "gnn",
+  "mlp"
+ ],
+ "nn_seeds": [
+  0
+ ],
+ "nn_epochs": 8,
+ "nn_hidden": 256,
+ "nn_layers": 1,
+ "every": 3,
+ "decision": "joint_plugin",
+ "_note": "Phase 3c candidate (p4): v1 tuned on the 11 validation weeks. XGB depth 4 / min_child_weight 20 with early stopping (inner validation = last 7 days of training cutoffs, refit on all), NN width 256, 1 hidden layer"
+}
