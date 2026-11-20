@@ -36,7 +36,7 @@ educational use within the course.
 * **Validation.** Rolling, the last 6 labelled Saturdays: a model validated at V trains only on cutoffs
   ≤ V − 14 days, whose label windows (+ 5 days for late rows) end before V. On these weeks we compared full
   and simplified feature sets, then an XGBoost grid (depth, learning rate, number of trees) and a deeper
-  user–repo GNN (`src/grid_xgb.py`, `src/hgnn.py`). The final model scored 44.80 (six activities) and 42.06
+  user–repo GNN. The final model scored 44.80 (six activities) and 42.06
   (without the activities that have a collection outage in the label window). The full 217-feature model
   scored higher on six activities (45.51); we chose the simpler one after seeing the results, so the
   comparison is not a significance test.
@@ -53,7 +53,6 @@ educational use within the course.
 | `src/build_dataset.py`, `src/leakage_audit.py` | weekly training samples and features; point-in-time check |
 | `src/modeling.py`, `src/gnn.py`, `src/pipeline.py`, `src/exp.py`, `src/exp2.py` | XGBoost, MLP, the final method and its rolling backtest |
 | `src/predict.py`, `src/manifest.py` | writes and checks `output_<studentID>.csv`; records hashes and versions |
-| `src/grid_xgb.py`, `src/hgnn.py` | model search: XGBoost grid and the deeper GNN (rolling, last 6 Saturdays) |
 
 ## How to run
 

@@ -73,7 +73,7 @@ def check_output(path: Path, users: np.ndarray):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--student-id", required=True)
-    ap.add_argument("--config", default=None, help="config json relative to the project root (default final_config.json)")
+    ap.add_argument("--config", default=None, help="config json relative to the project root (default: the submitted configuration, configs/final_config_xgb_d3.json)")
     ap.add_argument("--cutoff", default=None,
                     help="expected cutoff (UTC); stop if final_features was built at another one")
     a = ap.parse_args()

@@ -5,10 +5,14 @@ fit_predict(df, ev, cut, target_rows, cfg):
   1. training samples = every (user, cutoff) with cutoff <= cut - 8 days; with the weekly Saturday
      cutoffs that is cut - 14 d and earlier, whose label windows (+ 5 d late-arrival slack) end before
      `cut`, so the labels use only rows known before `cut` (no label censoring needed)
-  2. gradient-boosted trees (XGBoost, GPU) on all feature groups, several seeds
-  3. relational neural nets (user<->repo GNN and plain MLP), several seeds
+  2. gradient-boosted trees (XGBoost, GPU), one model per activity, several seeds
+  3. optional experiment branches, used only when the config asks for them: relational neural nets
+     (user<->repo GNN / MLP, cfg "nn_variants") and sequence models (cfg "seq_members")
   4. average the probabilities of all members
   5. label-free joint plug-in decision rule maximising the expected official score
+The submitted configuration (FINAL_CONFIG, configs/final_config_xgb_d3.json) uses XGBoost only: depth 3,
+learning rate 0.01, 1000 trees, 3 seeds, no neural net.  load_cfg() with no path loads it, so
+predict.py and pipeline.py --backtest use the submitted model unless another --config is given.
 Backtest:  python src/pipeline.py --backtest --val last6   (rolling, the last 6 labelled Saturdays)
 """
 from __future__ import annotations
@@ -46,7 +50,9 @@ FINAL_CONFIG = "configs/final_config_xgb_d3.json"   # the submitted configuratio
 
 
 def load_cfg(path=None):
-    p = ROOT / (path or "final_config.json")
+    """Config json relative to the project root; default = the submitted configuration (FINAL_CONFIG).
+    The legacy v1 configuration stays available as --config final_config.json."""
+    p = ROOT / (path or FINAL_CONFIG)
     if not p.is_file():  # a mistyped path must not silently fall back to the defaults
         raise FileNotFoundError(f"config file not found: {p}")
     if p.resolve() != (ROOT / FINAL_CONFIG).resolve():   # legacy configs still run unchanged; only a note
@@ -190,7 +196,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--backtest", action="store_true")
     ap.add_argument("--name", default="final_backtest")
-    ap.add_argument("--config", default=None, help="config json relative to the project root")
+    ap.add_argument("--config", default=None, help="config json relative to the project root (default: the submitted "
+                    "configuration, configs/final_config_xgb_d3.json)")
     ap.add_argument("--val", default="last6", help="lastN | comma-separated dates, e.g. 2026-10-31,2026-11-07")
     a = ap.parse_args()
     if a.backtest:
