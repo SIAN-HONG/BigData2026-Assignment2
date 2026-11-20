@@ -1,7 +1,7 @@
 """Record what a run used, so a rerun can be compared with it.
 
   python src/manifest.py --raw ~/gharchive --start 2025-12-01 --cutoff 2026-11-21T12:00 \
-      --config configs/final_config_s3.json --out results/manifest.json [--hash-hours]
+      --config configs/final_config_xgb_d3.json --out results/manifest.json [--hash-hours]
   python src/manifest.py --compare results/manifest.json other/manifest.json
 
 Writes: the hour-file bound (--cutoff) and the prediction cutoff, the effective config, ASG2_* settings,

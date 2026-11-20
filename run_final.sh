@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Build the tables from GH Archive and write the submission file.
 # Usage: ./run_final.sh <studentID> <gpu_index> [config] [cutoff]
-#   config  default configs/final_config_s3.json (simplified features, chosen by the 6-week rolling backtest)
+#   config  default configs/final_config_xgb_d3.json (52 features, XGBoost depth 3 x 3 seeds; chosen by the 6-week rolling backtest)
 #   cutoff  last UTC hour used, exclusive; default 2026-11-21T12:00 (= 20:00 Taiwan, 4 h before the
 #           test week 11-22 00:00 Taiwan).  An earlier cutoff gives a rehearsal file.
 # Check nvidia-smi for an idle GPU first.
 set -euo pipefail
-SID=${1:?student id}; GPU=${2:?gpu}; CFG=${3:-configs/final_config_s3.json}; CUT=${4:-2026-11-21T12:00}
+SID=${1:?student id}; GPU=${2:?gpu}; CFG=${3:-configs/final_config_xgb_d3.json}; CUT=${4:-2026-11-21T12:00}
 cd "$(dirname "$0")"
 unset ASG2_DB ASG2_ART ASG2_OUTAGE_RULE   # the submission always uses data/db and artifacts/ (recorded by manifest.py)
 [ -f "$CFG" ] || { echo "config not found: $CFG"; exit 1; }

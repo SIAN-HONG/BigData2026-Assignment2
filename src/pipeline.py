@@ -42,7 +42,7 @@ DEFAULT_CFG = {
 }
 
 
-FINAL_CONFIG = "configs/final_config_s3.json"   # the submitted configuration (run_final.sh default)
+FINAL_CONFIG = "configs/final_config_xgb_d3.json"   # the submitted configuration (run_final.sh default)
 
 
 def load_cfg(path=None):

@@ -18,8 +18,8 @@ educational use within the course.
 * **Point-in-time event log.** The 8 tables are merged into one event log; each row has the time of
   the action and the time it became known. Features at a cutoff t use only rows known before t.
 * **Samples.** One cutoff per week, Saturday 12:00 UTC (20:00 Taiwan), the weekday and hour of the
-  official cutoff, from 2026-03-21 (107 days after the data start, so the 90-day features and the
-  test-user rule have complete history). Labels = activity in [t+4h, t+4h+7d), the same offset as the
+  official cutoff, from 2026-03-21 (110.5 days after the data start; 107 are needed for the 90-day
+  features and the test-user rule). Labels = activity in [t+4h, t+4h+7d), the same offset as the
   test week. Users are selected with the rule that reproduces `test_input.csv`.
 * **Collection outages.** A day whose count of an activity is < 10 % of the median of the last 28
   earlier normal days is an outage; it is filled with that user's events of the day before the outage
@@ -30,12 +30,16 @@ educational use within the course.
   maintainer; the user's own PRs that were merged; own open PRs and issues (first seen in the last 90
   days). Cross-table, repositories and collaborators (9): number of repositories, share of activity in
   own repositories, number of collaborators, 7-day activity of the user's repositories (by type).
-* **Model.** XGBoost (one model per activity, 3 seeds) and an MLP; their probabilities are averaged and a
-  label-free decision rule chooses, for each activity, the number of positives that maximises the
-  expected score.
+* **Model.** XGBoost only: one model per activity, depth 3, learning rate 0.01, 1,000 trees, subsample and
+  colsample 0.7, min_child_weight 50, 3 seeds. The seeds' probabilities are averaged and a label-free decision
+  rule chooses, for each activity, the number of positives that maximises the expected score.
 * **Validation.** Rolling, the last 6 labelled Saturdays: a model validated at V trains only on cutoffs
-  ≤ V − 14 days, whose label windows (+ 5 days for late rows) end before V. The configuration was
-  chosen after comparing full and simplified feature sets on these weeks.
+  ≤ V − 14 days, whose label windows (+ 5 days for late rows) end before V. On these weeks we compared full
+  and simplified feature sets, then an XGBoost grid (depth, learning rate, number of trees) and a deeper
+  user–repo GNN (`src/grid_xgb.py`, `src/hgnn.py`). The final model scored 44.80 (six activities) and 42.06
+  (without the activities that have a collection outage in the label window). The full 217-feature model
+  scored higher on six activities (45.51); we chose the simpler one after seeing the results, so the
+  comparison is not a significance test.
 
 ## Files
 
@@ -43,12 +47,13 @@ educational use within the course.
 |---|---|
 | `run_final.sh` | the whole pipeline: course repo, download, preprocessing, features, leakage audit, prediction, manifest |
 | `download_gharchive.sh` | downloads the GH Archive hour files of a period |
-| `configs/final_config_s3.json` | the submitted configuration |
+| `configs/final_config_xgb_d3.json` | the submitted configuration |
 | `src/run_preprocess.py` | runs the official `preprocess.py` with more worker processes (same output) |
 | `src/common.py`, `src/features.py` | event log, labels, test-user rule; features and outage filling |
 | `src/build_dataset.py`, `src/leakage_audit.py` | weekly training samples and features; point-in-time check |
 | `src/modeling.py`, `src/gnn.py`, `src/pipeline.py`, `src/exp.py`, `src/exp2.py` | XGBoost, MLP, the final method and its rolling backtest |
 | `src/predict.py`, `src/manifest.py` | writes and checks `output_<studentID>.csv`; records hashes and versions |
+| `src/grid_xgb.py`, `src/hgnn.py` | model search: XGBoost grid and the deeper GNN (rolling, last 6 Saturdays) |
 
 ## How to run
 
@@ -58,7 +63,7 @@ Requirements: Linux, Python 3.11, git, wget, an NVIDIA GPU, about 200 GB of disk
 uv venv --python 3.11 .venv
 uv pip install --python .venv/bin/python -r requirements.txt
 # check nvidia-smi for an idle GPU, then:
-./run_final.sh <studentID> <gpu_index> configs/final_config_s3.json 2026-11-21T12:00
+./run_final.sh <studentID> <gpu_index> configs/final_config_xgb_d3.json 2026-11-21T12:00
 ```
 
 `run_final.sh` clones the course repository at commit `af9f335`, downloads the missing hour files
@@ -74,5 +79,5 @@ it never falls back to its own user selection. The written file is re-read and m
 Rolling backtest of the final configuration on tables built the same way (in `src/`):
 
 ```bash
-CUDA_VISIBLE_DEVICES=<gpu> ../.venv/bin/python pipeline.py --backtest --config configs/final_config_s3.json --val last6
+CUDA_VISIBLE_DEVICES=<gpu> ../.venv/bin/python pipeline.py --backtest --config configs/final_config_xgb_d3.json --val last6
 ```
